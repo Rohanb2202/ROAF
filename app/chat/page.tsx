@@ -44,7 +44,7 @@ import { CallScreen } from "@/components/call/call-screen"
 import { IncomingCall } from "@/components/call/incoming-call"
 import { ProfileAvatar } from "@/components/chat/profile-avatar"
 import type { FilterType } from "@/lib/image-filters"
-import { subscribeToIncomingCalls, type CallSession, type CallType } from "@/lib/webrtc/call-service"
+import { subscribeToIncomingCalls, CallService, type CallSession, type CallType } from "@/lib/webrtc/call-service"
 import { UserList } from "@/components/chat/user-list"
 import { Button } from "@/components/ui/button"
 import { Settings, Loader2, ArrowLeft, Menu, Heart, Phone, Video } from "lucide-react"
@@ -52,6 +52,7 @@ import Image from "next/image"
 import { savePendingMessage, getPendingMessages, deletePendingMessage } from "@/lib/storage/indexeddb"
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage"
 import { storage } from "@/lib/firebase/config"
+import { useSwipe } from "@/hooks/use-swipe"
 
 export default function ChatPage() {
   const { user, loading: authLoading } = useAuth()
@@ -62,7 +63,6 @@ export default function ChatPage() {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(false)
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null)
-  const [isRecording, setIsRecording] = useState(false)
   const [isOnline, setIsOnline] = useState(true)
   const [showUserList, setShowUserList] = useState(true)
   const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null)
@@ -82,8 +82,20 @@ export default function ChatPage() {
   const [incomingCall, setIncomingCall] = useState<(CallSession & { id: string }) | null>(null)
   const [currentCallId, setCurrentCallId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
+
+  // Swipe right from edge to go back to user list (mobile only)
+  useSwipe(
+    {
+      onSwipeRight: () => {
+        if (chatId && !showUserList && window.innerWidth < 768) {
+          setShowUserList(true)
+          setChatId(null)
+          setSelectedUser(null)
+        }
+      },
+    },
+    { edgeOnly: true, edgeWidth: 40, threshold: 80 }
+  )
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -303,47 +315,18 @@ export default function ChatPage() {
     }
   }
 
-  const handleStartRecording = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop()
-      setIsRecording(false)
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        const mediaRecorder = new MediaRecorder(stream)
-        mediaRecorderRef.current = mediaRecorder
-        audioChunksRef.current = []
-
-        mediaRecorder.ondataavailable = (event) => {
-          audioChunksRef.current.push(event.data)
-        }
-
-        mediaRecorder.onstop = async () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" })
-          await handleSendVoiceMessage(audioBlob)
-          stream.getTracks().forEach((track) => track.stop())
-        }
-
-        mediaRecorder.start()
-        setIsRecording(true)
-      } catch (error) {
-        console.error("Failed to start recording:", error)
-      }
-    }
-  }
-
   const handleSendVoiceMessage = async (audioBlob: Blob) => {
     if (!chatId || !user || !encryptionKey) return
 
     try {
-      const arrayBuffer = await audioBlob.arrayBuffer()
-      const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
-      const encrypted = await encryptMessage(base64Audio, encryptionKey)
-
+      // Upload audio to storage (don't encrypt the audio data - it's too large)
       const filename = `voice_${Date.now()}.webm`
       const storageRef = ref(storage, `chats/${chatId}/voice/${filename}`)
       await uploadBytes(storageRef, audioBlob)
       const url = await getDownloadURL(storageRef)
+
+      // Encrypt just a placeholder (like we do with images)
+      const encrypted = await encryptMessage("voice", encryptionKey)
 
       const message = {
         senderId: user.uid,
@@ -620,8 +603,15 @@ export default function ChatPage() {
   }
 
   const handleRejectIncomingCall = async () => {
-    if (!incomingCall) return
-    // The CallService will handle rejection
+    if (!incomingCall || !user) return
+    try {
+      // Create a temporary CallService instance to reject the call
+      const tempCallService = new CallService(user.uid)
+      await tempCallService.rejectCall(incomingCall.id)
+      tempCallService.destroy()
+    } catch (error) {
+      console.error("Failed to reject call:", error)
+    }
     setIncomingCall(null)
   }
 
@@ -674,13 +664,13 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
+    <div className="flex h-[100dvh] bg-background overflow-hidden">
       {/* User List Sidebar */}
-      <div className={`${showUserList ? "flex" : "hidden"} md:flex flex-col w-full md:w-80 border-r bg-card h-screen`}>
+      <div className={`${showUserList ? "flex" : "hidden"} md:flex flex-col w-full md:w-80 border-r bg-card h-[100dvh]`}>
         <div className="flex items-center justify-between p-4 border-b shrink-0">
-          <div className="flex items-center gap-3">
-            <Image src="/logo.png" alt="ROAF" width={32} height={32} />
-            <h1 className="font-bold text-lg">ROAF</h1>
+          <div className="flex items-center gap-2">
+            <img src="/logo.png" alt="ROAF" width={28} height={28} className="object-contain" />
+            <img src="/title_logo.png" alt="ROAF" className="h-10 w-auto object-contain" />
           </div>
           <Button variant="ghost" size="icon" onClick={() => router.push("/settings")}>
             <Settings className="h-5 w-5" />
@@ -703,11 +693,11 @@ export default function ChatPage() {
       </div>
 
       {/* Chat Area */}
-      <div className={`${showUserList ? "hidden" : "flex"} md:flex flex-col flex-1 h-screen overflow-hidden`}>
+      <div className={`${showUserList ? "hidden" : "flex"} md:flex flex-col flex-1 h-[100dvh] md:h-screen overflow-hidden`}>
         {!chatId ? (
           <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-            <Image src="/logo.png" alt="ROAF" width={80} height={80} className="mb-4" />
-            <h2 className="text-2xl font-bold mb-2">Welcome to ROAF</h2>
+            <img src="/logo.png" alt="ROAF" className="w-20 h-20 object-contain mb-2" />
+            <img src="/title_logo.png" alt="ROAF - Connecting 2 Souls" className="h-14 w-auto object-contain mb-4" />
             <p className="text-muted-foreground max-w-md">
               Select your partner to start chatting
             </p>
@@ -719,7 +709,7 @@ export default function ChatPage() {
         ) : (
           <>
             {/* Chat Header */}
-            <header className="bg-card border-b px-4 py-3 flex items-center gap-3 shadow-sm shrink-0 sticky top-0 z-10">
+            <header className="bg-card border-b px-4 py-3 flex items-center gap-3 shadow-sm shrink-0 sticky top-0 z-10 min-h-[64px]">
               <Button
                 variant="ghost"
                 size="icon"
@@ -797,7 +787,7 @@ export default function ChatPage() {
             </header>
 
             {/* Messages */}
-            <div className={`flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-2 ${getChatBackgroundClass()}`}>
+            <div className={`flex-1 overflow-y-auto overflow-x-hidden p-4 pb-4 space-y-2 ${getChatBackgroundClass()}`}>
               {loading ? (
                 <div className="flex items-center justify-center h-full">
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -851,16 +841,15 @@ export default function ChatPage() {
             </div>
 
             {/* Input */}
-            <div className="shrink-0">
+            <div className="shrink-0 bg-background border-t sticky bottom-0 z-10">
               <MessageInput
                 onSendMessage={handleSendMessage}
-                onStartRecording={handleStartRecording}
+                onSendVoiceMessage={handleSendVoiceMessage}
                 onImageSelect={handleSendImage}
                 onVideoSelect={handleSendVideo}
                 onStickerSelect={handleSendSticker}
                 onGifSelect={handleSendGif}
                 onPollCreate={() => setShowPollCreator(true)}
-                isRecording={isRecording}
                 disabled={!isOnline}
               />
             </div>

@@ -26,23 +26,19 @@ export function StoryCreator({ open, onOpenChange, onCreateStory }: StoryCreator
   const [isLoading, setIsLoading] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [previewImage, setPreviewImage] = useState<HTMLImageElement | null>(null)
+  const [cameraError, setCameraError] = useState<string | null>(null)
 
   const startCamera = async () => {
     setIsLoading(true)
+    setCameraError(null)
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop())
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode,
-          width: { ideal: 1080 },
-          height: { ideal: 1920 },
-        },
-        audio: false,
-      })
+      // Simple camera access like microphone - just { video: true }
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true })
 
       streamRef.current = stream
 
@@ -50,8 +46,15 @@ export function StoryCreator({ open, onOpenChange, onCreateStory }: StoryCreator
         videoRef.current.srcObject = stream
         await videoRef.current.play()
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Camera error:", error)
+      if (error.name === "NotFoundError") {
+        setCameraError("No camera found. Use the gallery to upload an image instead.")
+      } else if (error.name === "NotAllowedError") {
+        setCameraError("Camera access denied. Please allow camera permissions.")
+      } else {
+        setCameraError("Could not access camera. Try uploading from gallery.")
+      }
     } finally {
       setIsLoading(false)
     }
@@ -69,16 +72,16 @@ export function StoryCreator({ open, onOpenChange, onCreateStory }: StoryCreator
       startCamera()
     }
 
-    return () => {
-      if (!open) {
-        stopCamera()
-        setCapturedImage(null)
-        setSelectedFilter("none")
-        setMode("camera")
-        setPreviewImage(null)
-      }
+    if (!open) {
+      stopCamera()
+      setCapturedImage(null)
+      setSelectedFilter("none")
+      setMode("camera")
+      setPreviewImage(null)
+      setCameraError(null)
     }
-  }, [open, mode, facingMode])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mode])
 
   const handleCapture = () => {
     if (!videoRef.current) return
@@ -160,8 +163,27 @@ export function StoryCreator({ open, onOpenChange, onCreateStory }: StoryCreator
     onOpenChange(false)
   }
 
-  const handleSwitchCamera = () => {
-    setFacingMode(prev => prev === "user" ? "environment" : "user")
+  const handleSwitchCamera = async () => {
+    // Toggle facing mode and restart camera
+    const newFacingMode = facingMode === "user" ? "environment" : "user"
+    setFacingMode(newFacingMode)
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop())
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: newFacingMode }
+      })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+      }
+    } catch (error) {
+      console.error("Failed to switch camera:", error)
+    }
   }
 
   const getFilterPreviewStyle = (filterId: FilterType): React.CSSProperties => {
@@ -174,7 +196,10 @@ export function StoryCreator({ open, onOpenChange, onCreateStory }: StoryCreator
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-full h-full sm:max-w-full sm:h-full p-0 m-0 rounded-none bg-black">
+      <DialogContent
+        showCloseButton={false}
+        className="!max-w-none !w-screen !h-[100dvh] !p-0 !m-0 !rounded-none !border-0 !top-0 !left-0 !translate-x-0 !translate-y-0 bg-black overflow-hidden"
+      >
         <DialogTitle className="sr-only">Create Story</DialogTitle>
 
         <div className="relative w-full h-full flex flex-col">
@@ -197,16 +222,30 @@ export function StoryCreator({ open, onOpenChange, onCreateStory }: StoryCreator
                     <Loader2 className="h-8 w-8 animate-spin text-white" />
                   </div>
                 )}
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className={cn(
-                    "w-full h-full object-cover",
-                    facingMode === "user" && "scale-x-[-1]"
-                  )}
-                />
+                {cameraError ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black z-10 p-8 text-center">
+                    <Camera className="h-16 w-16 text-white/50 mb-4" />
+                    <p className="text-white/70 mb-6">{cameraError}</p>
+                    <Button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="gap-2"
+                    >
+                      <ImageIcon className="h-5 w-5" />
+                      Choose from Gallery
+                    </Button>
+                  </div>
+                ) : (
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className={cn(
+                      "w-full h-full object-cover",
+                      facingMode === "user" && "scale-x-[-1]"
+                    )}
+                  />
+                )}
               </div>
 
               {/* Camera Controls */}

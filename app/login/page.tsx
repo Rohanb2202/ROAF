@@ -6,12 +6,11 @@ import { signInWithEmail, signUpWithEmail, setupRecaptcha, signInWithPhone } fro
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 // Tabs kept for phone sign-in if re-enabled later
 // import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
 import { Loader2, Heart } from "lucide-react"
-import Image from "next/image"
 import type { ConfirmationResult } from "firebase/auth"
 
 export default function LoginPage() {
@@ -126,15 +125,11 @@ export default function LoginPage() {
 
       <Card className="w-full max-w-md shadow-2xl border-border/50">
         <CardHeader className="text-center space-y-4">
-          <div className="flex justify-center">
-            <div className="relative w-24 h-24">
-              <Image src="/logo.png" alt="ROAF Logo" fill className="object-contain" priority />
-            </div>
+          <div className="flex flex-col items-center gap-2">
+            <img src="/logo.png" alt="ROAF Logo" className="w-20 h-20 object-contain" />
+            <img src="/title_logo.png" alt="ROAF - Connecting 2 Souls" className="h-14 w-auto object-contain" />
           </div>
-          <div>
-            <CardTitle className="text-3xl font-bold text-balance">Welcome to ROAF</CardTitle>
-            <CardDescription className="text-balance">Private end-to-end encrypted chat for two</CardDescription>
-          </div>
+          <CardDescription className="text-balance">Private end-to-end encrypted chat</CardDescription>
         </CardHeader>
 
         <CardContent>

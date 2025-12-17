@@ -40,6 +40,7 @@ export function CallScreen({
 }: CallScreenProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
+  const remoteAudioRef = useRef<HTMLAudioElement>(null)
   const callServiceRef = useRef<CallService | null>(null)
 
   const [callStatus, setCallStatus] = useState<CallStatus>(isIncoming ? "ringing" : "calling")
@@ -65,8 +66,14 @@ export function CallScreen({
     }
 
     callService.onRemoteStream = (stream) => {
+      // For video calls, use the video element
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = stream
+      }
+      // For voice calls (or as backup for audio), use the audio element
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = stream
+        remoteAudioRef.current.play().catch(console.error)
       }
       setHasRemoteStream(true)
     }
@@ -207,10 +214,16 @@ export function CallScreen({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-full h-full sm:max-w-md sm:h-[90vh] p-0 m-0 rounded-none sm:rounded-2xl bg-black overflow-hidden">
+      <DialogContent
+        showCloseButton={false}
+        className="!max-w-none !w-screen !h-[100dvh] !p-0 !m-0 !rounded-none !border-0 !top-0 !left-0 !translate-x-0 !translate-y-0 sm:!max-w-md sm:!w-[400px] sm:!h-[90vh] sm:!rounded-2xl sm:!top-[5vh] sm:!left-1/2 sm:!-translate-x-1/2 bg-black overflow-hidden"
+      >
         <DialogTitle className="sr-only">
           {callType === "video" ? "Video Call" : "Voice Call"}
         </DialogTitle>
+
+        {/* Hidden audio element for remote audio stream */}
+        <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
         <div className="relative w-full h-full flex flex-col">
           {/* Video Call UI */}

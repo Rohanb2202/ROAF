@@ -102,14 +102,25 @@ export class CallService {
 
   // Get local media stream
   private async getLocalStream(type: CallType): Promise<MediaStream> {
-    const constraints: MediaStreamConstraints = {
-      audio: true,
-      video: type === "video" ? { facingMode: "user", width: 640, height: 480 } : false,
+    try {
+      // Try with ideal constraints first
+      const constraints: MediaStreamConstraints = {
+        audio: true,
+        video: type === "video" ? { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } } : false,
+      }
+
+      this.localStream = await navigator.mediaDevices.getUserMedia(constraints)
+    } catch (error) {
+      console.log("Falling back to basic media constraints")
+      // Fallback to basic constraints
+      const fallbackConstraints: MediaStreamConstraints = {
+        audio: true,
+        video: type === "video" ? true : false,
+      }
+      this.localStream = await navigator.mediaDevices.getUserMedia(fallbackConstraints)
     }
 
-    this.localStream = await navigator.mediaDevices.getUserMedia(constraints)
     this.onLocalStream?.(this.localStream)
-
     return this.localStream
   }
 

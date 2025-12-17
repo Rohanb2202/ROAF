@@ -129,7 +129,10 @@ export function StoryViewer({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-full h-full sm:max-w-md sm:h-[90vh] p-0 m-0 rounded-none sm:rounded-2xl bg-black overflow-hidden">
+      <DialogContent
+        showCloseButton={false}
+        className="!max-w-none !w-screen !h-[100dvh] !p-0 !m-0 !rounded-none !border-0 !top-0 !left-0 !translate-x-0 !translate-y-0 sm:!max-w-md sm:!w-[400px] sm:!h-[90vh] sm:!rounded-2xl sm:!top-[5vh] sm:!left-1/2 sm:!-translate-x-1/2 bg-black overflow-hidden"
+      >
         <DialogTitle className="sr-only">Story Viewer</DialogTitle>
 
         <div className="relative w-full h-full flex flex-col" onClick={handleTap}>
@@ -212,11 +215,11 @@ export function StoryViewer({
           </div>
 
           {/* Story Content */}
-          <div className="flex-1 flex items-center justify-center">
+          <div className="flex-1 flex items-center justify-center overflow-hidden">
             <img
               src={currentStory.mediaUrl}
               alt="Story"
-              className="max-w-full max-h-full object-contain"
+              className="w-full h-full object-contain"
             />
           </div>
 
