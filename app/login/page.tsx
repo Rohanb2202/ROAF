@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { signInWithEmail, signUpWithEmail, setupRecaptcha, signInWithPhone } from "@/lib/firebase/auth"
+import { useAuth } from "@/lib/context/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,14 +15,31 @@ import { Loader2, Heart } from "lucide-react"
 import type { ConfirmationResult } from "firebase/auth"
 
 export default function LoginPage() {
+  const { user, loading: authLoading } = useAuth()
+  const router = useRouter()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [phoneNumber, setPhoneNumber] = useState("")
   const [otp, setOtp] = useState("")
   const [loading, setLoading] = useState(false)
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null)
-  const router = useRouter()
   const { toast } = useToast()
+
+  // Redirect logged-in users to chat
+  useEffect(() => {
+    if (!authLoading && user) {
+      router.replace("/chat")
+    }
+  }, [user, authLoading, router])
+
+  // Show loading while checking auth
+  if (authLoading || user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-secondary/30 to-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
 
   const handleEmailLogin = async (isSignUp: boolean) => {
     if (!email || !password) {

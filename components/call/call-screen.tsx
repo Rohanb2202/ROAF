@@ -12,6 +12,9 @@ import {
   VideoOff,
   SwitchCamera,
   Volume2,
+  Volume1,
+  Bluetooth,
+  Smartphone,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { CallService, type CallType, type CallStatus } from "@/lib/webrtc/call-service"
@@ -22,6 +25,7 @@ interface CallScreenProps {
   onOpenChange: (open: boolean) => void
   callType: CallType
   isIncoming: boolean
+  autoAnswer?: boolean // Auto-answer when coming from IncomingCall
   callId?: string
   currentUserId: string
   otherUser: UserProfile | null
@@ -33,6 +37,7 @@ export function CallScreen({
   onOpenChange,
   callType,
   isIncoming,
+  autoAnswer = false,
   callId,
   currentUserId,
   otherUser,
@@ -43,13 +48,37 @@ export function CallScreen({
   const remoteAudioRef = useRef<HTMLAudioElement>(null)
   const callServiceRef = useRef<CallService | null>(null)
 
-  const [callStatus, setCallStatus] = useState<CallStatus>(isIncoming ? "ringing" : "calling")
+  const [callStatus, setCallStatus] = useState<CallStatus>(isIncoming && !autoAnswer ? "ringing" : "calling")
   const [isMuted, setIsMuted] = useState(false)
   const [isVideoOff, setIsVideoOff] = useState(false)
   const [callDuration, setCallDuration] = useState(0)
   const [hasRemoteStream, setHasRemoteStream] = useState(false)
 
+  // Audio output state
+  type AudioOutputMode = "phone" | "speaker" | "bluetooth"
+  const [audioOutputMode, setAudioOutputMode] = useState<AudioOutputMode>("phone")
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([])
+  const [bluetoothAvailable, setBluetoothAvailable] = useState(false)
+
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Define handleClose early so it can be used in useEffects
+  const handleClose = useCallback(() => {
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current)
+    }
+
+    if (callServiceRef.current) {
+      callServiceRef.current.destroy()
+      callServiceRef.current = null
+    }
+
+    setCallDuration(0)
+    setHasRemoteStream(false)
+    setCallStatus("ended")
+    onCallEnd()
+    onOpenChange(false)
+  }, [onCallEnd, onOpenChange])
 
   // Initialize call service
   useEffect(() => {
@@ -66,19 +95,24 @@ export function CallScreen({
     }
 
     callService.onRemoteStream = (stream) => {
+      console.log("Remote stream received:", stream.getTracks().map(t => t.kind))
+
       // For video calls, use the video element
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = stream
+        // Explicitly try to play (handles autoplay restrictions)
+        remoteVideoRef.current.play().catch(e => console.log("Video autoplay blocked:", e))
       }
       // For voice calls (or as backup for audio), use the audio element
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = stream
-        remoteAudioRef.current.play().catch(console.error)
+        remoteAudioRef.current.play().catch(e => console.log("Audio autoplay blocked:", e))
       }
       setHasRemoteStream(true)
     }
 
     callService.onCallStatusChange = (status) => {
+      console.log("Call status changed:", status)
       setCallStatus(status)
 
       if (status === "connected") {
@@ -97,7 +131,11 @@ export function CallScreen({
     const initializeCall = async () => {
       try {
         if (isIncoming && callId) {
-          // Wait for user to accept
+          if (autoAnswer) {
+            // Auto-answer when coming from IncomingCall
+            await callService.answerCall(callId)
+          }
+          // Otherwise wait for user to accept
         } else if (otherUser) {
           await callService.startCall(otherUser.uid, callType)
         }
@@ -107,7 +145,7 @@ export function CallScreen({
       }
     }
 
-    if (!isIncoming) {
+    if (!isIncoming || autoAnswer) {
       initializeCall()
     }
 
@@ -116,7 +154,132 @@ export function CallScreen({
         clearInterval(durationIntervalRef.current)
       }
     }
-  }, [open, currentUserId, isIncoming, callId, otherUser, callType])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, currentUserId, isIncoming, autoAnswer, callId, otherUser, callType])
+
+  // Backup: close when status becomes rejected or ended
+  useEffect(() => {
+    if (callStatus === "rejected" || callStatus === "ended") {
+      const timer = setTimeout(() => {
+        handleClose()
+      }, 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [callStatus, handleClose])
+
+  // Enumerate audio output devices
+  useEffect(() => {
+    const enumerateDevices = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const audioOutputs = devices.filter(d => d.kind === "audiooutput")
+        setAudioDevices(audioOutputs)
+
+        // Check if bluetooth is available
+        const hasBluetooth = audioOutputs.some(d =>
+          d.label.toLowerCase().includes("bluetooth") ||
+          d.label.toLowerCase().includes("airpods") ||
+          d.label.toLowerCase().includes("headphone") ||
+          d.label.toLowerCase().includes("wireless")
+        )
+        setBluetoothAvailable(hasBluetooth)
+      } catch (error) {
+        console.log("Could not enumerate audio devices:", error)
+      }
+    }
+
+    if (open) {
+      enumerateDevices()
+      // Re-enumerate when devices change
+      navigator.mediaDevices.addEventListener("devicechange", enumerateDevices)
+      return () => {
+        navigator.mediaDevices.removeEventListener("devicechange", enumerateDevices)
+      }
+    }
+  }, [open])
+
+  // Handle audio output switching
+  const handleAudioOutputChange = async () => {
+    // Cycle through modes: phone -> speaker -> bluetooth (if available) -> phone
+    let nextMode: AudioOutputMode = "phone"
+
+    if (audioOutputMode === "phone") {
+      nextMode = "speaker"
+    } else if (audioOutputMode === "speaker") {
+      nextMode = bluetoothAvailable ? "bluetooth" : "phone"
+    } else {
+      nextMode = "phone"
+    }
+
+    setAudioOutputMode(nextMode)
+
+    // Try to set the audio output device
+    try {
+      const audioElement = remoteAudioRef.current as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
+      const videoElement = remoteVideoRef.current as HTMLVideoElement & { setSinkId?: (id: string) => Promise<void> }
+
+      if (audioElement?.setSinkId || videoElement?.setSinkId) {
+        let targetDeviceId = ""
+
+        if (nextMode === "speaker") {
+          // Find speaker device (usually the default or one with "speaker" in name)
+          const speakerDevice = audioDevices.find(d =>
+            d.label.toLowerCase().includes("speaker") ||
+            d.deviceId === "default"
+          )
+          targetDeviceId = speakerDevice?.deviceId || "default"
+        } else if (nextMode === "bluetooth") {
+          // Find bluetooth device
+          const bluetoothDevice = audioDevices.find(d =>
+            d.label.toLowerCase().includes("bluetooth") ||
+            d.label.toLowerCase().includes("airpods") ||
+            d.label.toLowerCase().includes("headphone") ||
+            d.label.toLowerCase().includes("wireless")
+          )
+          targetDeviceId = bluetoothDevice?.deviceId || ""
+        } else {
+          // Phone earpiece - use communications device if available
+          const earpieceDevice = audioDevices.find(d =>
+            d.label.toLowerCase().includes("earpiece") ||
+            d.label.toLowerCase().includes("communications") ||
+            d.deviceId === "communications"
+          )
+          targetDeviceId = earpieceDevice?.deviceId || ""
+        }
+
+        if (targetDeviceId && audioElement?.setSinkId) {
+          await audioElement.setSinkId(targetDeviceId)
+        }
+        if (targetDeviceId && videoElement?.setSinkId) {
+          await videoElement.setSinkId(targetDeviceId)
+        }
+      }
+    } catch (error) {
+      console.log("Could not switch audio output:", error)
+    }
+  }
+
+  const getAudioOutputIcon = () => {
+    switch (audioOutputMode) {
+      case "speaker":
+        return <Volume2 className="h-6 w-6 text-white" />
+      case "bluetooth":
+        return <Bluetooth className="h-6 w-6 text-white" />
+      default:
+        return <Smartphone className="h-6 w-6 text-white" />
+    }
+  }
+
+  const getAudioOutputLabel = () => {
+    switch (audioOutputMode) {
+      case "speaker":
+        return "Speaker"
+      case "bluetooth":
+        return "Bluetooth"
+      default:
+        return "Phone"
+    }
+  }
 
   const handleAcceptCall = async () => {
     if (!callServiceRef.current || !callId) return
@@ -149,23 +312,6 @@ export function CallScreen({
     }
     handleClose()
   }
-
-  const handleClose = useCallback(() => {
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current)
-    }
-
-    if (callServiceRef.current) {
-      callServiceRef.current.destroy()
-      callServiceRef.current = null
-    }
-
-    setCallDuration(0)
-    setHasRemoteStream(false)
-    setCallStatus("ended")
-    onCallEnd()
-    onOpenChange(false)
-  }, [onCallEnd, onOpenChange])
 
   const handleToggleMute = () => {
     if (callServiceRef.current) {
@@ -357,6 +503,23 @@ export function CallScreen({
                   ) : (
                     <Mic className="h-6 w-6 text-white" />
                   )}
+                </Button>
+
+                {/* Audio Output Toggle */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    "h-14 w-14 rounded-full relative",
+                    audioOutputMode === "speaker" ? "bg-blue-500 hover:bg-blue-600" : "bg-white/20 hover:bg-white/30"
+                  )}
+                  onClick={handleAudioOutputChange}
+                  title={getAudioOutputLabel()}
+                >
+                  {getAudioOutputIcon()}
+                  <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[10px] text-white/70 whitespace-nowrap">
+                    {getAudioOutputLabel()}
+                  </span>
                 </Button>
 
                 {/* Video Toggle (video calls only) */}

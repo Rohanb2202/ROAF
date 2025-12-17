@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 interface StickerPickerProps {
   onStickerSelect: (pack: string, id: string) => void
   disabled?: boolean
+  asMenuItem?: boolean
 }
 
 // Sticker packs using emojis (can be replaced with actual PNG stickers)
@@ -105,7 +106,7 @@ const STICKER_PACKS = {
   },
 }
 
-export function StickerPicker({ onStickerSelect, disabled }: StickerPickerProps) {
+export function StickerPicker({ onStickerSelect, disabled, asMenuItem }: StickerPickerProps) {
   const [activePack, setActivePack] = useState<keyof typeof STICKER_PACKS>("reactions")
   const [isOpen, setIsOpen] = useState(false)
 
@@ -114,18 +115,31 @@ export function StickerPicker({ onStickerSelect, disabled }: StickerPickerProps)
     setIsOpen(false)
   }
 
+  const triggerButton = asMenuItem ? (
+    <Button
+      variant="ghost"
+      disabled={disabled}
+      className="h-16 w-16 flex-col gap-1 p-1"
+    >
+      <Sticker className="h-5 w-5 text-pink-500" />
+      <span className="text-[10px]">Sticker</span>
+    </Button>
+  ) : (
+    <Button
+      variant="ghost"
+      size="icon"
+      disabled={disabled}
+      className="shrink-0"
+    >
+      <Sticker className="h-5 w-5" />
+      <span className="sr-only">Sticker picker</span>
+    </Button>
+  )
+
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          disabled={disabled}
-          className="shrink-0"
-        >
-          <Sticker className="h-5 w-5" />
-          <span className="sr-only">Sticker picker</span>
-        </Button>
+        {triggerButton}
       </PopoverTrigger>
       <PopoverContent
         side="top"

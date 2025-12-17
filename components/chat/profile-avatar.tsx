@@ -17,16 +17,16 @@ interface ProfileAvatarProps {
 }
 
 const sizeClasses = {
-  sm: "h-8 w-8",
-  md: "h-10 w-10",
-  lg: "h-14 w-14",
+  sm: "h-10 w-10",
+  md: "h-12 w-12",
+  lg: "h-16 w-16", // Same as story circles (64px)
   xl: "h-20 w-20",
 }
 
 const textSizeClasses = {
-  sm: "text-xs",
-  md: "text-sm",
-  lg: "text-lg",
+  sm: "text-sm",
+  md: "text-base",
+  lg: "text-xl",
   xl: "text-2xl",
 }
 

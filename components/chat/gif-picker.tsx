@@ -11,9 +11,10 @@ import { cn } from "@/lib/utils"
 interface GifPickerProps {
   onGifSelect: (gif: TenorGif) => void
   disabled?: boolean
+  asMenuItem?: boolean
 }
 
-export function GifPicker({ onGifSelect, disabled }: GifPickerProps) {
+export function GifPicker({ onGifSelect, disabled, asMenuItem }: GifPickerProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [gifs, setGifs] = useState<TenorGif[]>([])
@@ -64,18 +65,31 @@ export function GifPicker({ onGifSelect, disabled }: GifPickerProps) {
     setSearchQuery("")
   }
 
+  const triggerButton = asMenuItem ? (
+    <Button
+      variant="ghost"
+      disabled={disabled}
+      className="h-16 w-16 flex-col gap-1 p-1"
+    >
+      <Gift className="h-5 w-5 text-cyan-500" />
+      <span className="text-[10px]">GIF</span>
+    </Button>
+  ) : (
+    <Button
+      variant="ghost"
+      size="icon"
+      disabled={disabled}
+      className="shrink-0"
+    >
+      <Gift className="h-5 w-5" />
+      <span className="sr-only">GIF picker</span>
+    </Button>
+  )
+
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          disabled={disabled}
-          className="shrink-0"
-        >
-          <Gift className="h-5 w-5" />
-          <span className="sr-only">GIF picker</span>
-        </Button>
+        {triggerButton}
       </DialogTrigger>
       <DialogContent className="max-w-md max-h-[80vh] p-0 flex flex-col">
         <DialogHeader className="p-4 pb-0">

@@ -2,19 +2,37 @@
 
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { Check, CheckCheck, Clock, Play, X, Download } from "lucide-react"
+import { Check, CheckCheck, Clock, Play, X, Download, MoreVertical, Trash2 } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import type { Message } from "@/lib/firebase/firestore"
 
 interface MediaMessageProps {
   message: Message
   isSent: boolean
+  onDelete?: (messageId: string) => void
 }
 
-export function MediaMessage({ message, isSent }: MediaMessageProps) {
+export function MediaMessage({ message, isSent, onDelete }: MediaMessageProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
   const handleDownload = () => {
     if (!message.storageUrl) return
@@ -72,13 +90,41 @@ export function MediaMessage({ message, isSent }: MediaMessageProps) {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   }
 
+  const handleDelete = () => {
+    if (message.id && onDelete) {
+      onDelete(message.id)
+    }
+    setShowDeleteDialog(false)
+  }
+
   const aspectRatio = message.mediaWidth && message.mediaHeight
     ? message.mediaWidth / message.mediaHeight
     : 1
 
   return (
     <>
-      <div className={cn("flex w-full mb-2", isSent ? "justify-end" : "justify-start")}>
+      <div className={cn("flex w-full mb-2 group", isSent ? "justify-end" : "justify-start")}>
+        {/* Delete menu - shown on left for sent messages */}
+        {isSent && onDelete && (
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity mr-1 self-center">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => setShowDeleteDialog(true)}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
         <div
           className={cn(
             "relative rounded-2xl overflow-hidden shadow-sm cursor-pointer",
@@ -139,6 +185,28 @@ export function MediaMessage({ message, isSent }: MediaMessageProps) {
             {isSent && <span>{getStatusIcon()}</span>}
           </div>
         </div>
+
+        {/* Delete menu - shown on right for received messages */}
+        {!isSent && onDelete && (
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity ml-1 self-center">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => setShowDeleteDialog(true)}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
       </div>
 
       {/* Lightbox Dialog */}
@@ -185,6 +253,24 @@ export function MediaMessage({ message, isSent }: MediaMessageProps) {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {message.type === "image" ? "image" : "video"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this {message.type === "image" ? "image" : "video"}. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

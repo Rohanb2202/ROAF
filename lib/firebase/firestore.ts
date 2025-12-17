@@ -200,6 +200,12 @@ export async function updateMessageStatus(chatId: string, messageId: string, sta
   await updateDoc(messageRef, { status })
 }
 
+// Delete a message
+export async function deleteMessage(chatId: string, messageId: string) {
+  const messageRef = doc(db, "chats", chatId, "messages", messageId)
+  await deleteDoc(messageRef)
+}
+
 // Listen to messages in real-time
 export function subscribeToMessages(chatId: string, callback: (messages: Message[]) => void): Unsubscribe {
   const messagesRef = collection(db, "chats", chatId, "messages")

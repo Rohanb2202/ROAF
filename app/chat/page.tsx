@@ -7,6 +7,7 @@ import {
   getOrCreateChat,
   subscribeToMessages,
   sendMessage,
+  deleteMessage,
   getUserProfile,
   getAllUsers,
   markMessagesAsRead,
@@ -503,6 +504,22 @@ export default function ChatPage() {
     }
   }
 
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!chatId) return
+
+    try {
+      await deleteMessage(chatId, messageId)
+      // Also remove from decrypted messages cache
+      setDecryptedMessages((prev) => {
+        const newMap = new Map(prev)
+        newMap.delete(messageId)
+        return newMap
+      })
+    } catch (error) {
+      console.error("Failed to delete message:", error)
+    }
+  }
+
   const handleCreateLoveNote = async (content: string, revealAt: Date, occasion?: string) => {
     if (!user || !selectedUser || !encryptionKey) return
 
@@ -593,11 +610,14 @@ export default function ChatPage() {
     setShowCallScreen(true)
   }
 
+  const [autoAnswerCall, setAutoAnswerCall] = useState(false)
+
   const handleAcceptIncomingCall = () => {
     if (!incomingCall) return
     setCallType(incomingCall.type)
     setIsIncomingCall(true)
     setCurrentCallId(incomingCall.id)
+    setAutoAnswerCall(true) // Auto-answer since user already accepted
     setShowCallScreen(true)
     setIncomingCall(null)
   }
@@ -619,6 +639,7 @@ export default function ChatPage() {
     setShowCallScreen(false)
     setCurrentCallId(null)
     setIsIncomingCall(false)
+    setAutoAnswerCall(false)
   }
 
   // Mark messages as read when viewing
@@ -709,11 +730,11 @@ export default function ChatPage() {
         ) : (
           <>
             {/* Chat Header */}
-            <header className="bg-card border-b px-4 py-3 flex items-center gap-3 shadow-sm shrink-0 sticky top-0 z-10 min-h-[64px]">
+            <header className="bg-card border-b px-2 sm:px-4 py-2 flex items-center gap-2 shadow-sm shrink-0 sticky top-0 z-10 min-h-[56px]">
               <Button
                 variant="ghost"
                 size="icon"
-                className="md:hidden"
+                className="md:hidden shrink-0 h-9 w-9"
                 onClick={() => {
                   setShowUserList(true)
                   setChatId(null)
@@ -727,63 +748,69 @@ export default function ChatPage() {
                 photoURL={selectedUser?.photoURL}
                 displayName={selectedUser?.displayName}
                 email={selectedUser?.email}
-                size="md"
+                size="sm"
                 expandable={true}
               />
 
-              <div className="flex-1">
-                <h2 className="font-semibold">{getPartnerDisplayName()}</h2>
+              <div className="flex-1 min-w-0">
+                <h2 className="font-semibold text-sm truncate">{getPartnerDisplayName()}</h2>
                 <p className="text-xs text-muted-foreground">{isOnline ? "Online" : "Offline"}</p>
               </div>
 
-              {/* Love Notes Button */}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="relative"
-                onClick={() => setShowLoveNoteBox(true)}
-              >
-                <Heart className="h-5 w-5 text-pink-500" />
-                {unreadNotesCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-pink-500 text-white text-xs rounded-full flex items-center justify-center">
-                    {unreadNotesCount}
-                  </span>
-                )}
-              </Button>
+              {/* Action buttons - compact on mobile */}
+              <div className="flex items-center gap-0.5 sm:gap-1">
+                {/* Love Notes Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="relative h-8 w-8 sm:h-9 sm:w-9"
+                  onClick={() => setShowLoveNoteBox(true)}
+                >
+                  <Heart className="h-4 w-4 sm:h-5 sm:w-5 text-pink-500" />
+                  {unreadNotesCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-pink-500 text-white text-[10px] rounded-full flex items-center justify-center">
+                      {unreadNotesCount}
+                    </span>
+                  )}
+                </Button>
 
-              {/* Write Love Note Button */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setShowLoveNoteCreator(true)}
-                title="Write a love note"
-              >
-                <Heart className="h-5 w-5" fill="currentColor" />
-              </Button>
+                {/* Write Love Note Button - hidden on very small screens */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="hidden sm:flex h-8 w-8 sm:h-9 sm:w-9"
+                  onClick={() => setShowLoveNoteCreator(true)}
+                  title="Write a love note"
+                >
+                  <Heart className="h-4 w-4 sm:h-5 sm:w-5" fill="currentColor" />
+                </Button>
 
-              {/* Voice Call Button */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleStartCall("voice")}
-                title="Voice call"
-              >
-                <Phone className="h-5 w-5" />
-              </Button>
+                {/* Voice Call Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 sm:h-9 sm:w-9"
+                  onClick={() => handleStartCall("voice")}
+                  title="Voice call"
+                >
+                  <Phone className="h-4 w-4 sm:h-5 sm:w-5" />
+                </Button>
 
-              {/* Video Call Button */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleStartCall("video")}
-                title="Video call"
-              >
-                <Video className="h-5 w-5" />
-              </Button>
+                {/* Video Call Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 sm:h-9 sm:w-9"
+                  onClick={() => handleStartCall("video")}
+                  title="Video call"
+                >
+                  <Video className="h-4 w-4 sm:h-5 sm:w-5" />
+                </Button>
 
-              <Button variant="ghost" size="icon" onClick={() => router.push("/settings")}>
-                <Settings className="h-5 w-5" />
-              </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-9 sm:w-9" onClick={() => router.push("/settings")}>
+                  <Settings className="h-4 w-4 sm:h-5 sm:w-5" />
+                </Button>
+              </div>
             </header>
 
             {/* Messages */}
@@ -800,13 +827,13 @@ export default function ChatPage() {
                     if (msg.type === "voice") {
                       return (
                         <div key={msg.id} className={`flex w-full ${isSent ? "justify-end" : "justify-start"}`}>
-                          <VoiceMessage audioUrl={msg.storageUrl!} isSent={isSent} />
+                          <VoiceMessage audioUrl={msg.storageUrl!} isSent={isSent} messageId={msg.id} onDelete={handleDeleteMessage} />
                         </div>
                       )
                     }
 
                     if (msg.type === "image" || msg.type === "video") {
-                      return <MediaMessage key={msg.id} message={msg} isSent={isSent} />
+                      return <MediaMessage key={msg.id} message={msg} isSent={isSent} onDelete={handleDeleteMessage} />
                     }
 
                     if (msg.type === "sticker") {
@@ -832,7 +859,7 @@ export default function ChatPage() {
                     const decryptedContent = decryptedMessages.get(msg.id!) || "Decrypting..."
 
                     return (
-                      <MessageBubble key={msg.id} message={msg} decryptedContent={decryptedContent} isSent={isSent} />
+                      <MessageBubble key={msg.id} message={msg} decryptedContent={decryptedContent} isSent={isSent} onDelete={handleDeleteMessage} />
                     )
                   })}
                   <div ref={messagesEndRef} />
@@ -907,6 +934,7 @@ export default function ChatPage() {
           onOpenChange={setShowCallScreen}
           callType={callType}
           isIncoming={isIncomingCall}
+          autoAnswer={autoAnswerCall}
           callId={currentCallId || undefined}
           currentUserId={user.uid}
           otherUser={selectedUser}
