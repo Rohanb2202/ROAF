@@ -253,7 +253,7 @@ export async function markMessagesAsRead(chatId: string, currentUid: string): Pr
 // Update user profile
 export async function updateUserProfile(
   uid: string,
-  updates: Partial<Pick<UserProfile, "displayName" | "photoURL">>
+  updates: Partial<Pick<UserProfile, "displayName" | "photoURL" | "partnerNickname" | "chatBackground">>
 ): Promise<void> {
   const userRef = doc(db, "users", uid)
   await updateDoc(userRef, updates)
