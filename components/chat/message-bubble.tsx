@@ -20,6 +20,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { useLongPress } from "@/hooks/use-long-press"
 import type { Message } from "@/lib/firebase/firestore"
 
 interface MessageBubbleProps {
@@ -31,6 +32,15 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message, decryptedContent, isSent, onDelete }: MessageBubbleProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+
+  const longPressHandlers = useLongPress({
+    onLongPress: () => {
+      if (onDelete) {
+        setShowDeleteDialog(true)
+      }
+    },
+  })
+
   const getStatusIcon = () => {
     switch (message.status) {
       case "sending":
@@ -86,11 +96,12 @@ export function MessageBubble({ message, decryptedContent, isSent, onDelete }: M
 
         <div
           className={cn(
-            "max-w-[75%] rounded-2xl px-4 py-2 shadow-sm",
+            "max-w-[75%] rounded-2xl px-4 py-2 shadow-sm select-none",
             isSent
               ? "bg-primary text-primary-foreground message-sent rounded-br-md"
               : "bg-card text-card-foreground border message-received rounded-bl-md",
           )}
+          {...longPressHandlers}
         >
           {isDecryptionFailed ? (
             <div className="flex items-center gap-2 text-sm opacity-60 italic">

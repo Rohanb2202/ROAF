@@ -85,7 +85,24 @@ export interface UserProfile {
   photoURL?: string
   partnerNickname?: string // nickname for partner (only visible to this user)
   chatBackground?: string // background theme for chat
+  vaultPinHash?: string // hashed PIN for vault access
+  isOnline?: boolean // real-time presence
+  lastSeen?: any // timestamp of last activity
   createdAt: any
+}
+
+export interface VaultItem {
+  id?: string
+  chatId: string
+  messageId: string
+  senderId: string
+  type: "image" | "video"
+  storageUrl: string
+  thumbnailUrl?: string
+  mediaWidth?: number
+  mediaHeight?: number
+  archivedAt: any
+  originalCreatedAt: any
 }
 
 export async function saveUserProfile(user: { uid: string; email: string; displayName?: string; photoURL?: string }) {
@@ -259,7 +276,7 @@ export async function markMessagesAsRead(chatId: string, currentUid: string): Pr
 // Update user profile
 export async function updateUserProfile(
   uid: string,
-  updates: Partial<Pick<UserProfile, "displayName" | "photoURL" | "partnerNickname" | "chatBackground">>
+  updates: Partial<Pick<UserProfile, "displayName" | "photoURL" | "partnerNickname" | "chatBackground" | "vaultPinHash">>
 ): Promise<void> {
   const userRef = doc(db, "users", uid)
   await updateDoc(userRef, updates)
@@ -480,4 +497,135 @@ export async function cleanupExpiredLoveNotes(): Promise<void> {
   })
 
   await Promise.all(deletes)
+}
+
+// ========== SECRET VAULT ==========
+
+// Add item to vault
+export async function addToVault(
+  userId: string,
+  item: Omit<VaultItem, "id" | "archivedAt">
+): Promise<string> {
+  const vaultRef = collection(db, "users", userId, "vault")
+  const docRef = await addDoc(vaultRef, {
+    ...item,
+    archivedAt: serverTimestamp(),
+  })
+  return docRef.id
+}
+
+// Get vault items
+export async function getVaultItems(userId: string): Promise<VaultItem[]> {
+  const vaultRef = collection(db, "users", userId, "vault")
+  const q = query(vaultRef, orderBy("archivedAt", "desc"))
+  const snapshot = await getDocs(q)
+
+  const items: VaultItem[] = []
+  snapshot.forEach(docSnapshot => {
+    items.push({ id: docSnapshot.id, ...docSnapshot.data() } as VaultItem)
+  })
+
+  return items
+}
+
+// Subscribe to vault items
+export function subscribeToVaultItems(
+  userId: string,
+  callback: (items: VaultItem[]) => void
+): Unsubscribe {
+  const vaultRef = collection(db, "users", userId, "vault")
+  const q = query(vaultRef, orderBy("archivedAt", "desc"))
+
+  return onSnapshot(q, snapshot => {
+    const items: VaultItem[] = []
+    snapshot.forEach(docSnapshot => {
+      items.push({ id: docSnapshot.id, ...docSnapshot.data() } as VaultItem)
+    })
+    callback(items)
+  })
+}
+
+// Delete vault item
+export async function deleteVaultItem(userId: string, itemId: string): Promise<void> {
+  const itemRef = doc(db, "users", userId, "vault", itemId)
+  await deleteDoc(itemRef)
+}
+
+// Archive media messages older than 24 hours to vault
+export async function archiveOldMediaToVault(
+  chatId: string,
+  userId: string
+): Promise<number> {
+  const messagesRef = collection(db, "chats", chatId, "messages")
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+
+  // Get all messages (we'll filter client-side for type)
+  const q = query(messagesRef, orderBy("createdAt", "asc"))
+  const snapshot = await getDocs(q)
+
+  let archivedCount = 0
+
+  for (const docSnapshot of snapshot.docs) {
+    const message = docSnapshot.data() as Message
+    const createdAt = message.createdAt?.toDate?.() || new Date(message.createdAt)
+
+    // Only archive images and videos older than 24 hours
+    if (
+      (message.type === "image" || message.type === "video") &&
+      message.storageUrl &&
+      createdAt < twentyFourHoursAgo
+    ) {
+      // Check if already in vault
+      const vaultRef = collection(db, "users", userId, "vault")
+      const existingQuery = query(vaultRef, where("messageId", "==", docSnapshot.id))
+      const existingSnapshot = await getDocs(existingQuery)
+
+      if (existingSnapshot.empty) {
+        // Add to vault
+        await addToVault(userId, {
+          chatId,
+          messageId: docSnapshot.id,
+          senderId: message.senderId,
+          type: message.type as "image" | "video",
+          storageUrl: message.storageUrl,
+          thumbnailUrl: message.thumbnailUrl,
+          mediaWidth: message.mediaWidth,
+          mediaHeight: message.mediaHeight,
+          originalCreatedAt: message.createdAt,
+        })
+        archivedCount++
+      }
+    }
+  }
+
+  return archivedCount
+}
+
+// Presence functions
+export async function updatePresence(userId: string, isOnline: boolean) {
+  try {
+    const userRef = doc(db, "users", userId)
+    await setDoc(userRef, {
+      isOnline,
+      lastSeen: serverTimestamp(),
+    }, { merge: true })
+  } catch (error) {
+    console.error("Failed to update presence:", error)
+  }
+}
+
+export function subscribeToUserPresence(
+  userId: string,
+  callback: (isOnline: boolean, lastSeen: Date | null) => void
+): Unsubscribe {
+  const userRef = doc(db, "users", userId)
+  return onSnapshot(userRef, (docSnapshot) => {
+    if (docSnapshot.exists()) {
+      const data = docSnapshot.data()
+      const lastSeen = data.lastSeen?.toDate ? data.lastSeen.toDate() : null
+      callback(data.isOnline || false, lastSeen)
+    } else {
+      callback(false, null)
+    }
+  })
 }

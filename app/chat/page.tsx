@@ -19,6 +19,9 @@ import {
   subscribeToStories,
   viewStory,
   cleanupExpiredStories,
+  archiveOldMediaToVault,
+  updatePresence,
+  subscribeToUserPresence,
   type Message,
   type UserProfile,
   type PollOption,
@@ -47,8 +50,9 @@ import { ProfileAvatar } from "@/components/chat/profile-avatar"
 import type { FilterType } from "@/lib/image-filters"
 import { subscribeToIncomingCalls, CallService, type CallSession, type CallType } from "@/lib/webrtc/call-service"
 import { UserList } from "@/components/chat/user-list"
+import { SecretVault } from "@/components/vault/secret-vault"
 import { Button } from "@/components/ui/button"
-import { Settings, Loader2, ArrowLeft, Menu, Heart, Phone, Video } from "lucide-react"
+import { Settings, Loader2, ArrowLeft, Menu, Heart, Phone, Video, Lock, Instagram } from "lucide-react"
 import Image from "next/image"
 import { savePendingMessage, getPendingMessages, deletePendingMessage } from "@/lib/storage/indexeddb"
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage"
@@ -64,7 +68,9 @@ export default function ChatPage() {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(false)
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null)
-  const [isOnline, setIsOnline] = useState(true)
+  const [isNetworkOnline, setIsNetworkOnline] = useState(true)
+  const [partnerOnline, setPartnerOnline] = useState(false)
+  const [partnerLastSeen, setPartnerLastSeen] = useState<Date | null>(null)
   const [showUserList, setShowUserList] = useState(true)
   const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null)
   const [showPollCreator, setShowPollCreator] = useState(false)
@@ -82,6 +88,8 @@ export default function ChatPage() {
   const [isIncomingCall, setIsIncomingCall] = useState(false)
   const [incomingCall, setIncomingCall] = useState<(CallSession & { id: string }) | null>(null)
   const [currentCallId, setCurrentCallId] = useState<string | null>(null)
+  const [showVault, setShowVault] = useState(false)
+  const [activeTab, setActiveTab] = useState<"chat" | "instagram">("chat")
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Swipe right from edge to go back to user list (mobile only)
@@ -105,8 +113,8 @@ export default function ChatPage() {
   }, [user, authLoading, router])
 
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true)
-    const handleOffline = () => setIsOnline(false)
+    const handleOnline = () => setIsNetworkOnline(true)
+    const handleOffline = () => setIsNetworkOnline(false)
 
     window.addEventListener("online", handleOnline)
     window.addEventListener("offline", handleOffline)
@@ -116,6 +124,55 @@ export default function ChatPage() {
       window.removeEventListener("offline", handleOffline)
     }
   }, [])
+
+  // Update own presence
+  useEffect(() => {
+    if (!user) return
+
+    // Set online when component mounts
+    updatePresence(user.uid, true).catch(console.error)
+
+    // Update presence on visibility change
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        updatePresence(user.uid, true).catch(console.error)
+      } else {
+        updatePresence(user.uid, false).catch(console.error)
+      }
+    }
+
+    // Periodic heartbeat to keep presence alive
+    const heartbeat = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        updatePresence(user.uid, true).catch(console.error)
+      }
+    }, 30000) // Every 30 seconds
+
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+
+    // Set offline when component unmounts
+    return () => {
+      updatePresence(user.uid, false).catch(console.error)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      clearInterval(heartbeat)
+    }
+  }, [user])
+
+  // Subscribe to partner's presence
+  useEffect(() => {
+    if (!selectedUser) {
+      setPartnerOnline(false)
+      setPartnerLastSeen(null)
+      return
+    }
+
+    const unsubscribe = subscribeToUserPresence(selectedUser.uid, (isOnline, lastSeen) => {
+      setPartnerOnline(isOnline)
+      setPartnerLastSeen(lastSeen)
+    })
+
+    return () => unsubscribe()
+  }, [selectedUser])
 
   useEffect(() => {
     const initEncryption = async () => {
@@ -227,7 +284,7 @@ export default function ChatPage() {
       })
 
       // Try to send pending offline messages
-      if (isOnline) {
+      if (isNetworkOnline) {
         const pending = await getPendingMessages()
         for (const pm of pending) {
           try {
@@ -283,6 +340,28 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
+  // Auto-archive media older than 24 hours to vault
+  useEffect(() => {
+    if (!chatId || !user) return
+
+    const archiveMedia = async () => {
+      try {
+        const archivedCount = await archiveOldMediaToVault(chatId, user.uid)
+        if (archivedCount > 0) {
+          console.log(`Archived ${archivedCount} media items to vault`)
+        }
+      } catch (error) {
+        console.error("Failed to archive media to vault:", error)
+      }
+    }
+
+    // Run archive check on mount and periodically
+    archiveMedia()
+    const interval = setInterval(archiveMedia, 60 * 60 * 1000) // Check every hour
+
+    return () => clearInterval(interval)
+  }, [chatId, user])
+
   const handleSendMessage = async (content: string) => {
     if (!chatId || !user || !encryptionKey) return
 
@@ -297,7 +376,7 @@ export default function ChatPage() {
         status: "sent" as const,
       }
 
-      if (isOnline) {
+      if (isNetworkOnline) {
         await sendMessage(chatId, message)
       } else {
         await savePendingMessage(chatId, message)
@@ -684,6 +763,22 @@ export default function ChatPage() {
     return selectedUser?.displayName || "Partner"
   }
 
+  // Format last seen timestamp
+  const formatLastSeen = (date: Date) => {
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMs / 3600000)
+    const diffDays = Math.floor(diffMs / 86400000)
+
+    if (diffMins < 1) return "just now"
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    if (diffDays === 1) return "yesterday"
+    if (diffDays < 7) return `${diffDays}d ago`
+    return date.toLocaleDateString()
+  }
+
   return (
     <div className="flex h-[100dvh] bg-background overflow-hidden">
       {/* User List Sidebar */}
@@ -693,24 +788,82 @@ export default function ChatPage() {
             <img src="/logo.png" alt="ROAF" width={28} height={28} className="object-contain" />
             <img src="/title_logo.png" alt="ROAF" className="h-10 w-auto object-contain" />
           </div>
-          <Button variant="ghost" size="icon" onClick={() => router.push("/settings")}>
-            <Settings className="h-5 w-5" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" onClick={() => setShowVault(true)} title="Secret Vault">
+              <Lock className="h-5 w-5" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => router.push("/settings")}>
+              <Settings className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
-        {/* Stories Bar in Sidebar */}
-        {user && (
-          <StoriesBar
-            stories={stories}
-            users={allUsers}
-            currentUserId={user.uid}
-            partnerNickname={currentUserProfile?.partnerNickname}
-            onAddStory={() => setShowStoryCreator(true)}
-            onViewStory={handleViewStory}
-          />
+
+        {/* Tabs: Chat / Instagram */}
+        <div className="flex border-b shrink-0">
+          <button
+            onClick={() => setActiveTab("chat")}
+            className={`flex-1 py-3 px-4 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
+              activeTab === "chat"
+                ? "text-primary border-b-2 border-primary bg-primary/5"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            <Heart className="h-4 w-4" />
+            Chat
+          </button>
+          <button
+            onClick={() => setActiveTab("instagram")}
+            className={`flex-1 py-3 px-4 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
+              activeTab === "instagram"
+                ? "text-primary border-b-2 border-primary bg-primary/5"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            <Instagram className="h-4 w-4" />
+            Instagram
+          </button>
+        </div>
+
+        {activeTab === "chat" ? (
+          <>
+            {/* Stories Bar in Sidebar */}
+            {user && (
+              <StoriesBar
+                stories={stories}
+                users={allUsers}
+                currentUserId={user.uid}
+                partnerNickname={currentUserProfile?.partnerNickname}
+                onAddStory={() => setShowStoryCreator(true)}
+                onViewStory={handleViewStory}
+              />
+            )}
+            <div className="flex-1 overflow-hidden">
+              <UserList onSelectUser={handleSelectUser} partnerNickname={currentUserProfile?.partnerNickname} />
+            </div>
+          </>
+        ) : (
+          /* Instagram Tab Content */
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-purple-500 via-pink-500 to-orange-500 flex items-center justify-center mb-4">
+              <Instagram className="h-10 w-10 text-white" />
+            </div>
+            <h3 className="text-lg font-semibold mb-2">Open Instagram</h3>
+            <p className="text-sm text-muted-foreground mb-6 max-w-xs">
+              Browse your feed, post stories, send DMs, and stay connected with your partner on Instagram.
+            </p>
+            <Button
+              size="lg"
+              className="gap-2 bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 hover:opacity-90"
+              onClick={() => window.open("https://www.instagram.com", "_blank", "noopener,noreferrer")}
+            >
+              <Instagram className="h-5 w-5" />
+              Open Instagram
+            </Button>
+            <p className="text-xs text-muted-foreground mt-4">
+              Opens in a new tab
+            </p>
+          </div>
         )}
-        <div className="flex-1 overflow-hidden">
-          <UserList onSelectUser={handleSelectUser} partnerNickname={currentUserProfile?.partnerNickname} />
-        </div>
       </div>
 
       {/* Chat Area */}
@@ -754,7 +907,15 @@ export default function ChatPage() {
 
               <div className="flex-1 min-w-0">
                 <h2 className="font-semibold text-sm truncate">{getPartnerDisplayName()}</h2>
-                <p className="text-xs text-muted-foreground">{isOnline ? "Online" : "Offline"}</p>
+                <p className="text-xs text-muted-foreground">
+                  {partnerOnline ? (
+                    <span className="text-green-500">Online</span>
+                  ) : partnerLastSeen ? (
+                    `Last seen ${formatLastSeen(partnerLastSeen)}`
+                  ) : (
+                    "Offline"
+                  )}
+                </p>
               </div>
 
               {/* Action buttons - compact on mobile */}
@@ -837,11 +998,11 @@ export default function ChatPage() {
                     }
 
                     if (msg.type === "sticker") {
-                      return <StickerMessage key={msg.id} message={msg} isSent={isSent} />
+                      return <StickerMessage key={msg.id} message={msg} isSent={isSent} onDelete={handleDeleteMessage} />
                     }
 
                     if (msg.type === "gif") {
-                      return <GifMessage key={msg.id} message={msg} isSent={isSent} />
+                      return <GifMessage key={msg.id} message={msg} isSent={isSent} onDelete={handleDeleteMessage} />
                     }
 
                     if (msg.type === "poll") {
@@ -852,6 +1013,7 @@ export default function ChatPage() {
                           isSent={isSent}
                           currentUserId={user?.uid || ""}
                           onVote={(optionId) => handleVotePoll(msg.id!, optionId)}
+                          onDelete={handleDeleteMessage}
                         />
                       )
                     }
@@ -877,7 +1039,7 @@ export default function ChatPage() {
                 onStickerSelect={handleSendSticker}
                 onGifSelect={handleSendGif}
                 onPollCreate={() => setShowPollCreator(true)}
-                disabled={!isOnline}
+                disabled={!isNetworkOnline}
               />
             </div>
 
@@ -949,6 +1111,15 @@ export default function ChatPage() {
           caller={allUsers.get(incomingCall.callerId) || null}
           onAccept={handleAcceptIncomingCall}
           onReject={handleRejectIncomingCall}
+        />
+      )}
+
+      {/* Secret Vault */}
+      {user && (
+        <SecretVault
+          open={showVault}
+          onOpenChange={setShowVault}
+          userId={user.uid}
         />
       )}
     </div>

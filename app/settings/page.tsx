@@ -18,8 +18,9 @@ import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import { ProfileAvatar } from "@/components/chat/profile-avatar"
-import { ArrowLeft, Bell, Shield, LogOut, Copy, Check, Smartphone, Lock, Key, Camera, Loader2, User, Heart, Mail, Palette } from "lucide-react"
+import { ArrowLeft, Bell, Shield, LogOut, Copy, Check, Smartphone, Lock, Key, Camera, Loader2, User, Heart, Mail, Palette, Eye, EyeOff } from "lucide-react"
 import Image from "next/image"
+import { hashPin, verifyPin } from "@/lib/crypto/pin"
 
 export default function SettingsPage() {
   const { user, loading } = useAuth()
@@ -41,6 +42,12 @@ export default function SettingsPage() {
   const [emailPassword, setEmailPassword] = useState("")
   const [isChangingEmail, setIsChangingEmail] = useState(false)
   const [chatBackground, setChatBackground] = useState("")
+  const [hasVaultPin, setHasVaultPin] = useState(false)
+  const [currentVaultPin, setCurrentVaultPin] = useState("")
+  const [newVaultPin, setNewVaultPin] = useState("")
+  const [confirmVaultPin, setConfirmVaultPin] = useState("")
+  const [isChangingVaultPin, setIsChangingVaultPin] = useState(false)
+  const [showVaultPins, setShowVaultPins] = useState(false)
   const photoInputRef = useRef<HTMLInputElement>(null)
 
   const CHAT_BACKGROUNDS = [
@@ -67,6 +74,7 @@ export default function SettingsPage() {
           setDisplayName(userProfile.displayName || "")
           setPartnerNickname(userProfile.partnerNickname || "")
           setChatBackground(userProfile.chatBackground || "default")
+          setHasVaultPin(!!userProfile.vaultPinHash)
         }
       }
     }
@@ -272,6 +280,80 @@ export default function SettingsPage() {
         description: "Failed to change background",
         variant: "destructive",
       })
+    }
+  }
+
+  const handleChangeVaultPin = async () => {
+    if (!user?.uid) return
+
+    // Validation
+    if (hasVaultPin && !currentVaultPin) {
+      toast({
+        title: "Error",
+        description: "Please enter your current PIN",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (newVaultPin.length < 4) {
+      toast({
+        title: "Error",
+        description: "PIN must be at least 4 digits",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (newVaultPin !== confirmVaultPin) {
+      toast({
+        title: "Error",
+        description: "New PINs do not match",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsChangingVaultPin(true)
+    try {
+      // If they have a PIN, verify the current one
+      if (hasVaultPin && profile?.vaultPinHash) {
+        const isValid = await verifyPin(currentVaultPin, profile.vaultPinHash)
+        if (!isValid) {
+          toast({
+            title: "Error",
+            description: "Current PIN is incorrect",
+            variant: "destructive",
+          })
+          setIsChangingVaultPin(false)
+          return
+        }
+      }
+
+      // Hash and save new PIN
+      const newPinHash = await hashPin(newVaultPin)
+      await updateUserProfile(user.uid, { vaultPinHash: newPinHash })
+      setProfile((prev) => prev ? { ...prev, vaultPinHash: newPinHash } : null)
+      setHasVaultPin(true)
+
+      toast({
+        title: hasVaultPin ? "PIN Changed" : "PIN Created",
+        description: hasVaultPin ? "Your vault PIN has been updated" : "Your vault PIN has been created",
+      })
+
+      // Clear fields
+      setCurrentVaultPin("")
+      setNewVaultPin("")
+      setConfirmVaultPin("")
+    } catch (error) {
+      console.error("Failed to change vault PIN:", error)
+      toast({
+        title: "Update Failed",
+        description: "Failed to update vault PIN",
+        variant: "destructive",
+      })
+    } finally {
+      setIsChangingVaultPin(false)
     }
   }
 
@@ -532,6 +614,99 @@ export default function SettingsPage() {
                 messages. Your encryption keys are stored locally and never leave your device.
               </p>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Vault PIN */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Lock className="h-5 w-5" />
+              Secret Vault PIN
+            </CardTitle>
+            <CardDescription>
+              {hasVaultPin ? "Change your vault PIN" : "Set up a PIN to protect your secret vault"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {hasVaultPin && (
+              <div className="space-y-2">
+                <Label htmlFor="currentVaultPin">Current PIN</Label>
+                <div className="relative">
+                  <Input
+                    id="currentVaultPin"
+                    type={showVaultPins ? "text" : "password"}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    value={currentVaultPin}
+                    onChange={(e) => setCurrentVaultPin(e.target.value.replace(/\D/g, ""))}
+                    placeholder="Enter current PIN"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0"
+                    onClick={() => setShowVaultPins(!showVaultPins)}
+                  >
+                    {showVaultPins ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="newVaultPin">{hasVaultPin ? "New PIN" : "Create PIN"}</Label>
+              <div className="relative">
+                <Input
+                  id="newVaultPin"
+                  type={showVaultPins ? "text" : "password"}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={newVaultPin}
+                  onChange={(e) => setNewVaultPin(e.target.value.replace(/\D/g, ""))}
+                  placeholder="Enter 4-6 digit PIN"
+                />
+                {!hasVaultPin && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0"
+                    onClick={() => setShowVaultPins(!showVaultPins)}
+                  >
+                    {showVaultPins ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirmVaultPin">Confirm PIN</Label>
+              <Input
+                id="confirmVaultPin"
+                type={showVaultPins ? "text" : "password"}
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                value={confirmVaultPin}
+                onChange={(e) => setConfirmVaultPin(e.target.value.replace(/\D/g, ""))}
+                placeholder="Confirm your PIN"
+              />
+            </div>
+            <Button
+              onClick={handleChangeVaultPin}
+              disabled={isChangingVaultPin || newVaultPin.length < 4 || !confirmVaultPin || (hasVaultPin && !currentVaultPin)}
+              className="w-full"
+            >
+              {isChangingVaultPin ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : null}
+              {hasVaultPin ? "Change PIN" : "Set Up PIN"}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Your vault stores photos and videos after 24 hours. The PIN protects access to these memories.
+            </p>
           </CardContent>
         </Card>
 

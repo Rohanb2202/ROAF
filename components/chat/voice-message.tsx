@@ -20,6 +20,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { useLongPress } from "@/hooks/use-long-press"
 
 interface VoiceMessageProps {
   audioUrl: string
@@ -35,6 +36,14 @@ export function VoiceMessage({ audioUrl, isSent, duration, messageId, onDelete }
   const [currentTime, setCurrentTime] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
   const audioRef = useRef<HTMLAudioElement>(null)
+
+  const longPressHandlers = useLongPress({
+    onLongPress: () => {
+      if (onDelete) {
+        setShowDeleteDialog(true)
+      }
+    },
+  })
 
   const togglePlayPause = async () => {
     if (!audioRef.current) return
@@ -94,11 +103,12 @@ export function VoiceMessage({ audioUrl, isSent, duration, messageId, onDelete }
 
         <div
           className={cn(
-            "flex items-center gap-2 rounded-2xl px-4 py-2 shadow-sm min-w-[200px]",
+            "flex items-center gap-2 rounded-2xl px-4 py-2 shadow-sm min-w-[200px] select-none",
             isSent
               ? "bg-primary text-primary-foreground message-sent rounded-br-md"
               : "bg-card text-card-foreground border message-received rounded-bl-md",
           )}
+          {...longPressHandlers}
         >
           <audio
             ref={audioRef}

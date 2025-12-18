@@ -21,6 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { useLongPress } from "@/hooks/use-long-press"
 import type { Message } from "@/lib/firebase/firestore"
 
 interface MediaMessageProps {
@@ -33,6 +34,15 @@ export function MediaMessage({ message, isSent, onDelete }: MediaMessageProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+
+  const longPressHandlers = useLongPress({
+    onLongPress: () => {
+      if (onDelete) {
+        setShowDeleteDialog(true)
+      }
+    },
+    onClick: () => setIsOpen(true),
+  })
 
   const handleDownload = () => {
     if (!message.storageUrl) return
@@ -127,13 +137,13 @@ export function MediaMessage({ message, isSent, onDelete }: MediaMessageProps) {
         )}
         <div
           className={cn(
-            "relative rounded-2xl overflow-hidden shadow-sm cursor-pointer",
+            "relative rounded-2xl overflow-hidden shadow-sm cursor-pointer select-none",
             "w-fit max-w-[280px]",
             isSent
               ? "bg-primary message-sent rounded-br-md"
               : "bg-card border message-received rounded-bl-md"
           )}
-          onClick={() => setIsOpen(true)}
+          {...longPressHandlers}
         >
           {message.type === "image" ? (
             <div className="relative w-full" style={{ aspectRatio }}>
