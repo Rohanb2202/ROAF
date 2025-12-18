@@ -39,15 +39,30 @@ export interface IceCandidate {
   createdAt: any
 }
 
-// Free STUN servers
+// ICE servers for WebRTC (STUN + TURN)
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
+    // Google STUN servers
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun2.l.google.com:19302" },
-    { urls: "stun:stun3.l.google.com:19302" },
-    { urls: "stun:stun4.l.google.com:19302" },
+    // OpenRelay TURN servers (free, public)
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
   ],
+  iceCandidatePoolSize: 10,
 }
 
 export class CallService {
@@ -283,6 +298,11 @@ export class CallService {
         this.cleanup()
         this.onCallEnded?.()
       }
+    }, (error) => {
+      // Silently handle permission errors (e.g., during logout)
+      if (error.code !== "permission-denied") {
+        console.error("Call subscription error:", error)
+      }
     })
   }
 
@@ -308,6 +328,11 @@ export class CallService {
           }
         }
       })
+    }, (error) => {
+      // Silently handle permission errors (e.g., during logout)
+      if (error.code !== "permission-denied") {
+        console.error("ICE candidates subscription error:", error)
+      }
     })
   }
 
@@ -430,5 +455,10 @@ export function subscribeToIncomingCalls(
         }
       }
     })
+  }, (error) => {
+    // Silently handle permission errors (e.g., during logout)
+    if (error.code !== "permission-denied") {
+      console.error("Calls subscription error:", error)
+    }
   })
 }

@@ -8,6 +8,7 @@ import {
   subscribeToMessages,
   sendMessage,
   deleteMessage,
+  editMessage,
   getUserProfile,
   getAllUsers,
   markMessagesAsRead,
@@ -18,6 +19,7 @@ import {
   createStory,
   subscribeToStories,
   viewStory,
+  deleteStory,
   cleanupExpiredStories,
   archiveOldMediaToVault,
   updatePresence,
@@ -52,6 +54,8 @@ import { subscribeToIncomingCalls, CallService, type CallSession, type CallType 
 import { UserList } from "@/components/chat/user-list"
 import { SecretVault } from "@/components/vault/secret-vault"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
 import { Settings, Loader2, ArrowLeft, Menu, Heart, Phone, Video, Lock, Instagram } from "lucide-react"
 import Image from "next/image"
 import { savePendingMessage, getPendingMessages, deletePendingMessage } from "@/lib/storage/indexeddb"
@@ -90,6 +94,9 @@ export default function ChatPage() {
   const [currentCallId, setCurrentCallId] = useState<string | null>(null)
   const [showVault, setShowVault] = useState(false)
   const [activeTab, setActiveTab] = useState<"chat" | "instagram">("chat")
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [editingContent, setEditingContent] = useState("")
+  const [showEditDialog, setShowEditDialog] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Swipe right from edge to go back to user list (mobile only)
@@ -599,6 +606,40 @@ export default function ChatPage() {
     }
   }
 
+  const handleStartEdit = (messageId: string, currentContent: string) => {
+    setEditingMessageId(messageId)
+    setEditingContent(currentContent)
+    setShowEditDialog(true)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!chatId || !editingMessageId || !encryptionKey || !editingContent.trim()) return
+
+    try {
+      const encrypted = await encryptMessage(editingContent.trim(), encryptionKey)
+      await editMessage(chatId, editingMessageId, encrypted.encryptedPayload, encrypted.iv)
+
+      // Update decrypted cache
+      setDecryptedMessages((prev) => {
+        const newMap = new Map(prev)
+        newMap.set(editingMessageId, editingContent.trim())
+        return newMap
+      })
+
+      setShowEditDialog(false)
+      setEditingMessageId(null)
+      setEditingContent("")
+    } catch (error) {
+      console.error("Failed to edit message:", error)
+    }
+  }
+
+  const handleCancelEdit = () => {
+    setShowEditDialog(false)
+    setEditingMessageId(null)
+    setEditingContent("")
+  }
+
   const handleCreateLoveNote = async (content: string, revealAt: Date, occasion?: string) => {
     if (!user || !selectedUser || !encryptionKey) return
 
@@ -671,6 +712,14 @@ export default function ChatPage() {
       await viewStory(storyId, user.uid)
     } catch (error) {
       console.error("Failed to mark story as viewed:", error)
+    }
+  }
+
+  const handleStoryDelete = async (storyId: string) => {
+    try {
+      await deleteStory(storyId)
+    } catch (error) {
+      console.error("Failed to delete story:", error)
     }
   }
 
@@ -1021,7 +1070,14 @@ export default function ChatPage() {
                     const decryptedContent = decryptedMessages.get(msg.id!) || "Decrypting..."
 
                     return (
-                      <MessageBubble key={msg.id} message={msg} decryptedContent={decryptedContent} isSent={isSent} onDelete={handleDeleteMessage} />
+                      <MessageBubble
+                        key={msg.id}
+                        message={msg}
+                        decryptedContent={decryptedContent}
+                        isSent={isSent}
+                        onDelete={handleDeleteMessage}
+                        onEdit={isSent ? handleStartEdit : undefined}
+                      />
                     )
                   })}
                   <div ref={messagesEndRef} />
@@ -1039,6 +1095,7 @@ export default function ChatPage() {
                 onStickerSelect={handleSendSticker}
                 onGifSelect={handleSendGif}
                 onPollCreate={() => setShowPollCreator(true)}
+                onLoveNoteCreate={() => setShowLoveNoteCreator(true)}
                 disabled={!isNetworkOnline}
               />
             </div>
@@ -1087,6 +1144,7 @@ export default function ChatPage() {
         users={allUsers}
         currentUserId={user?.uid || ""}
         onStoryViewed={handleStoryViewed}
+        onStoryDelete={handleStoryDelete}
       />
 
       {/* Call Screen */}
@@ -1122,6 +1180,30 @@ export default function ChatPage() {
           userId={user.uid}
         />
       )}
+
+      {/* Edit Message Dialog */}
+      <Dialog open={showEditDialog} onOpenChange={(open) => !open && handleCancelEdit()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit message</DialogTitle>
+          </DialogHeader>
+          <Textarea
+            value={editingContent}
+            onChange={(e) => setEditingContent(e.target.value)}
+            placeholder="Edit your message..."
+            className="min-h-[100px]"
+            autoFocus
+          />
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={handleCancelEdit}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={!editingContent.trim()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -2,8 +2,18 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { X, ChevronLeft, ChevronRight, Eye, Pause, Play } from "lucide-react"
+import { X, ChevronLeft, ChevronRight, Eye, Pause, Play, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Story, UserProfile } from "@/lib/firebase/firestore"
 
@@ -15,6 +25,7 @@ interface StoryViewerProps {
   currentUserId: string
   initialStoryIndex?: number
   onStoryViewed: (storyId: string) => void
+  onStoryDelete?: (storyId: string) => void
 }
 
 export function StoryViewer({
@@ -25,10 +36,12 @@ export function StoryViewer({
   currentUserId,
   initialStoryIndex = 0,
   onStoryViewed,
+  onStoryDelete,
 }: StoryViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(initialStoryIndex)
   const [progress, setProgress] = useState(0)
   const [isPaused, setIsPaused] = useState(false)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
   const currentStory = stories[currentIndex]
   const storyUser = currentStory ? users.get(currentStory.userId) : null
@@ -111,6 +124,23 @@ export function StoryViewer({
     }
   }
 
+  const handleDelete = () => {
+    if (currentStory && onStoryDelete) {
+      onStoryDelete(currentStory.id!)
+      setShowDeleteDialog(false)
+      // If there are more stories, move to next or previous
+      if (stories.length > 1) {
+        if (currentIndex >= stories.length - 1) {
+          setCurrentIndex(Math.max(0, currentIndex - 1))
+        }
+        setProgress(0)
+      } else {
+        // No more stories, close the viewer
+        onOpenChange(false)
+      }
+    }
+  }
+
   const formatTime = (timestamp: any) => {
     if (!timestamp) return ""
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
@@ -128,6 +158,7 @@ export function StoryViewer({
   if (!currentStory) return null
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
@@ -185,6 +216,21 @@ export function StoryViewer({
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Delete button - only for own stories */}
+              {currentStory.userId === currentUserId && onStoryDelete && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-white hover:bg-red-500/50"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsPaused(true)
+                    setShowDeleteDialog(true)
+                  }}
+                >
+                  <Trash2 className="h-5 w-5" />
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -247,5 +293,30 @@ export function StoryViewer({
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Delete Confirmation Dialog */}
+    <AlertDialog open={showDeleteDialog} onOpenChange={(open) => {
+      setShowDeleteDialog(open)
+      if (!open) setIsPaused(false)
+    }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete story?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently delete this story. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setIsPaused(false)}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={handleDelete}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }

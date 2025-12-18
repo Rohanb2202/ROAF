@@ -41,6 +41,9 @@ export interface Message {
   pollEnded?: boolean
   // Drawing fields
   drawingUrl?: string
+  // Edit fields
+  isEdited?: boolean
+  editedAt?: any
   createdAt: any
   status: "sending" | "sent" | "delivered" | "read"
 }
@@ -223,6 +226,16 @@ export async function deleteMessage(chatId: string, messageId: string) {
   await deleteDoc(messageRef)
 }
 
+export async function editMessage(chatId: string, messageId: string, encryptedPayload: string, iv: string) {
+  const messageRef = doc(db, "chats", chatId, "messages", messageId)
+  await updateDoc(messageRef, {
+    encryptedPayload,
+    iv,
+    isEdited: true,
+    editedAt: serverTimestamp(),
+  })
+}
+
 // Listen to messages in real-time
 export function subscribeToMessages(chatId: string, callback: (messages: Message[]) => void): Unsubscribe {
   const messagesRef = collection(db, "chats", chatId, "messages")
@@ -234,6 +247,11 @@ export function subscribeToMessages(chatId: string, callback: (messages: Message
       messages.push({ id: doc.id, ...doc.data() } as Message)
     })
     callback(messages)
+  }, (error) => {
+    // Silently handle permission errors (e.g., during logout)
+    if (error.code !== "permission-denied") {
+      console.error("Messages subscription error:", error)
+    }
   })
 }
 
@@ -364,6 +382,12 @@ export async function viewStory(storyId: string, viewerUid: string): Promise<voi
   }
 }
 
+// Delete a story
+export async function deleteStory(storyId: string): Promise<void> {
+  const storyRef = doc(db, "stories", storyId)
+  await deleteDoc(storyRef)
+}
+
 // Delete expired stories (call this periodically)
 export async function cleanupExpiredStories(): Promise<void> {
   const storiesRef = collection(db, "stories")
@@ -383,14 +407,26 @@ export async function cleanupExpiredStories(): Promise<void> {
 export function subscribeToStories(callback: (stories: Story[]) => void): Unsubscribe {
   const storiesRef = collection(db, "stories")
   const now = new Date()
-  const q = query(storiesRef, where("expiresAt", ">", now), orderBy("createdAt", "desc"))
+  // Order by expiresAt to avoid needing composite index, then sort client-side
+  const q = query(storiesRef, where("expiresAt", ">", now), orderBy("expiresAt", "asc"))
 
   return onSnapshot(q, snapshot => {
     const stories: Story[] = []
     snapshot.forEach(doc => {
       stories.push({ id: doc.id, ...doc.data() } as Story)
     })
+    // Sort by createdAt descending (newest first) client-side
+    stories.sort((a, b) => {
+      const aTime = a.createdAt?.toDate?.() || new Date(0)
+      const bTime = b.createdAt?.toDate?.() || new Date(0)
+      return bTime.getTime() - aTime.getTime()
+    })
     callback(stories)
+  }, (error) => {
+    // Silently handle permission errors (e.g., during logout)
+    if (error.code !== "permission-denied") {
+      console.error("Stories subscription error:", error)
+    }
   })
 }
 
@@ -467,20 +503,27 @@ export async function unsealLoveNotes(): Promise<void> {
 // Subscribe to love notes for a user
 export function subscribeToLoveNotes(userId: string, callback: (notes: LoveNote[]) => void): Unsubscribe {
   const notesRef = collection(db, "loveNotes")
-  const now = new Date()
 
-  const q = query(
-    notesRef,
-    where("toUserId", "==", userId),
-    where("expiresAt", ">", now)
-  )
+  // Query only by toUserId to avoid composite index, filter expired client-side
+  const q = query(notesRef, where("toUserId", "==", userId))
 
   return onSnapshot(q, snapshot => {
+    const now = new Date()
     const notes: LoveNote[] = []
     snapshot.forEach(doc => {
-      notes.push({ id: doc.id, ...doc.data() } as LoveNote)
+      const data = doc.data() as LoveNote
+      // Filter out expired notes client-side
+      const expiresAt = data.expiresAt?.toDate?.() || new Date(0)
+      if (expiresAt > now) {
+        notes.push({ id: doc.id, ...data })
+      }
     })
     callback(notes)
+  }, (error) => {
+    // Silently handle permission errors (e.g., during logout)
+    if (error.code !== "permission-denied") {
+      console.error("Love notes subscription error:", error)
+    }
   })
 }
 
@@ -542,6 +585,11 @@ export function subscribeToVaultItems(
       items.push({ id: docSnapshot.id, ...docSnapshot.data() } as VaultItem)
     })
     callback(items)
+  }, (error) => {
+    // Silently handle permission errors (e.g., during logout)
+    if (error.code !== "permission-denied") {
+      console.error("Vault subscription error:", error)
+    }
   })
 }
 
@@ -626,6 +674,11 @@ export function subscribeToUserPresence(
       callback(data.isOnline || false, lastSeen)
     } else {
       callback(false, null)
+    }
+  }, (error) => {
+    // Silently handle permission errors (e.g., during logout)
+    if (error.code !== "permission-denied") {
+      console.error("Presence subscription error:", error)
     }
   })
 }

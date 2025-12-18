@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Play, Pause, Loader2, MoreVertical, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -30,11 +30,13 @@ interface VoiceMessageProps {
   onDelete?: (messageId: string) => void
 }
 
-export function VoiceMessage({ audioUrl, isSent, duration, messageId, onDelete }: VoiceMessageProps) {
+export function VoiceMessage({ audioUrl, isSent, duration: propDuration, messageId, onDelete }: VoiceMessageProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
-  const [isLoading, setIsLoading] = useState(false)
+  const [duration, setDuration] = useState(propDuration || 0)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(false)
   const audioRef = useRef<HTMLAudioElement>(null)
 
   const longPressHandlers = useLongPress({
@@ -45,8 +47,65 @@ export function VoiceMessage({ audioUrl, isSent, duration, messageId, onDelete }
     },
   })
 
+  // Load audio metadata
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+
+    const handleLoadedMetadata = () => {
+      if (audio.duration && isFinite(audio.duration)) {
+        setDuration(audio.duration)
+      }
+      setIsLoading(false)
+    }
+
+    const handleCanPlay = () => {
+      setIsLoading(false)
+    }
+
+    const handleError = () => {
+      setError(true)
+      setIsLoading(false)
+      console.error("Failed to load audio:", audioUrl)
+    }
+
+    const handleEnded = () => {
+      setIsPlaying(false)
+      setCurrentTime(0)
+    }
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime)
+    }
+
+    const handleDurationChange = () => {
+      if (audio.duration && isFinite(audio.duration)) {
+        setDuration(audio.duration)
+      }
+    }
+
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata)
+    audio.addEventListener("canplay", handleCanPlay)
+    audio.addEventListener("error", handleError)
+    audio.addEventListener("ended", handleEnded)
+    audio.addEventListener("timeupdate", handleTimeUpdate)
+    audio.addEventListener("durationchange", handleDurationChange)
+
+    // Force load
+    audio.load()
+
+    return () => {
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata)
+      audio.removeEventListener("canplay", handleCanPlay)
+      audio.removeEventListener("error", handleError)
+      audio.removeEventListener("ended", handleEnded)
+      audio.removeEventListener("timeupdate", handleTimeUpdate)
+      audio.removeEventListener("durationchange", handleDurationChange)
+    }
+  }, [audioUrl])
+
   const togglePlayPause = async () => {
-    if (!audioRef.current) return
+    if (!audioRef.current || error) return
 
     if (isPlaying) {
       audioRef.current.pause()
@@ -56,8 +115,9 @@ export function VoiceMessage({ audioUrl, isSent, duration, messageId, onDelete }
       try {
         await audioRef.current.play()
         setIsPlaying(true)
-      } catch (error) {
-        console.error("Failed to play audio:", error)
+      } catch (err) {
+        console.error("Failed to play audio:", err)
+        setError(true)
       } finally {
         setIsLoading(false)
       }
@@ -65,6 +125,7 @@ export function VoiceMessage({ audioUrl, isSent, duration, messageId, onDelete }
   }
 
   const formatTime = (seconds: number) => {
+    if (!seconds || !isFinite(seconds)) return "0:00"
     const mins = Math.floor(seconds / 60)
     const secs = Math.floor(seconds % 60)
     return `${mins}:${secs.toString().padStart(2, "0")}`
@@ -76,6 +137,8 @@ export function VoiceMessage({ audioUrl, isSent, duration, messageId, onDelete }
     }
     setShowDeleteDialog(false)
   }
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0
 
   return (
     <>
@@ -113,12 +176,7 @@ export function VoiceMessage({ audioUrl, isSent, duration, messageId, onDelete }
           <audio
             ref={audioRef}
             src={audioUrl}
-            onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-            onEnded={() => {
-              setIsPlaying(false)
-              setCurrentTime(0)
-            }}
-            onLoadedMetadata={(e) => setIsLoading(false)}
+            preload="metadata"
           />
 
           <Button
@@ -126,7 +184,7 @@ export function VoiceMessage({ audioUrl, isSent, duration, messageId, onDelete }
             size="icon"
             variant="ghost"
             className={cn("h-8 w-8 rounded-full shrink-0", isSent ? "hover:bg-primary-foreground/20" : "")}
-            disabled={isLoading}
+            disabled={isLoading || error}
           >
             {isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -141,13 +199,11 @@ export function VoiceMessage({ audioUrl, isSent, duration, messageId, onDelete }
             <div className="h-1 bg-current/20 rounded-full overflow-hidden">
               <div
                 className="h-full bg-current transition-all"
-                style={{
-                  width: `${audioRef.current?.duration ? (currentTime / audioRef.current.duration) * 100 : 0}%`,
-                }}
+                style={{ width: `${progress}%` }}
               />
             </div>
             <p className="text-xs opacity-70 mt-1">
-              {formatTime(currentTime)} / {formatTime(audioRef.current?.duration || duration || 0)}
+              {error ? "Failed to load" : `${formatTime(currentTime)} / ${formatTime(duration)}`}
             </p>
           </div>
         </div>

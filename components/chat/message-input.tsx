@@ -5,7 +5,7 @@ import type React from "react"
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Send, Mic, Trash2, Play, Pause, Plus, Image as ImageIcon, Video, Camera, Sticker, ImagePlay, BarChart3 } from "lucide-react"
+import { Send, Mic, Trash2, Play, Pause, Plus, Image as ImageIcon, Video, Camera, Sticker, ImagePlay, BarChart3, Heart } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { CameraCapture } from "./camera-capture"
@@ -22,6 +22,7 @@ interface MessageInputProps {
   onStickerSelect: (pack: string, id: string) => void
   onGifSelect: (gif: TenorGif) => void
   onPollCreate: () => void
+  onLoveNoteCreate?: () => void
   disabled?: boolean
 }
 
@@ -35,6 +36,7 @@ export function MessageInput({
   onStickerSelect,
   onGifSelect,
   onPollCreate,
+  onLoveNoteCreate,
   disabled,
 }: MessageInputProps) {
   const [message, setMessage] = useState("")
@@ -436,6 +438,19 @@ export function MessageInput({
                   <BarChart3 className="h-5 w-5 text-orange-500" />
                   <span className="text-[10px]">Poll</span>
                 </Button>
+                {onLoveNoteCreate && (
+                  <Button
+                    variant="ghost"
+                    className="h-16 w-16 flex-col gap-1 p-1"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onLoveNoteCreate()
+                    }}
+                  >
+                    <Heart className="h-5 w-5 text-pink-500" />
+                    <span className="text-[10px]">Love Note</span>
+                  </Button>
+                )}
               </div>
             </PopoverContent>
           </Popover>

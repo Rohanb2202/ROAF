@@ -2,13 +2,14 @@
 
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { Check, CheckCheck, Clock, Lock, Trash2, MoreVertical } from "lucide-react"
+import { Check, CheckCheck, Clock, Lock, Trash2, MoreVertical, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import {
   AlertDialog,
@@ -28,15 +29,17 @@ interface MessageBubbleProps {
   decryptedContent: string
   isSent: boolean
   onDelete?: (messageId: string) => void
+  onEdit?: (messageId: string, currentContent: string) => void
 }
 
-export function MessageBubble({ message, decryptedContent, isSent, onDelete }: MessageBubbleProps) {
+export function MessageBubble({ message, decryptedContent, isSent, onDelete, onEdit }: MessageBubbleProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [showOptions, setShowOptions] = useState(false)
 
   const longPressHandlers = useLongPress({
     onLongPress: () => {
-      if (onDelete) {
-        setShowDeleteDialog(true)
+      if (onDelete || onEdit) {
+        setShowOptions(true)
       }
     },
   })
@@ -62,6 +65,14 @@ export function MessageBubble({ message, decryptedContent, isSent, onDelete }: M
 
   const isDecryptionFailed = decryptedContent === "[Failed to decrypt]"
 
+  // Check if message is within 5-minute edit window
+  const canEdit = () => {
+    if (!message.createdAt || !isSent) return false
+    const messageTime = message.createdAt.toDate ? message.createdAt.toDate() : new Date(message.createdAt)
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
+    return messageTime > fiveMinutesAgo
+  }
+
   const handleDelete = () => {
     if (message.id && onDelete) {
       onDelete(message.id)
@@ -69,26 +80,43 @@ export function MessageBubble({ message, decryptedContent, isSent, onDelete }: M
     setShowDeleteDialog(false)
   }
 
+  const handleEdit = () => {
+    if (message.id && onEdit && !isDecryptionFailed) {
+      onEdit(message.id, decryptedContent)
+    }
+  }
+
   return (
     <>
       <div className={cn("flex w-full mb-2 group", isSent ? "justify-end" : "justify-start")}>
-        {/* Delete menu - shown on left for sent messages */}
-        {isSent && onDelete && (
+        {/* Menu - shown on left for sent messages */}
+        {isSent && (onDelete || onEdit) && (
           <div className="opacity-0 group-hover:opacity-100 transition-opacity mr-1 self-center">
-            <DropdownMenu>
+            <DropdownMenu open={showOptions} onOpenChange={setShowOptions}>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-7 w-7">
                   <MoreVertical className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  className="text-destructive focus:text-destructive"
-                  onClick={() => setShowDeleteDialog(true)}
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete
-                </DropdownMenuItem>
+                {onEdit && !isDecryptionFailed && canEdit() && (
+                  <>
+                    <DropdownMenuItem onClick={handleEdit}>
+                      <Pencil className="h-4 w-4 mr-2" />
+                      Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                {onDelete && (
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => setShowDeleteDialog(true)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -112,12 +140,15 @@ export function MessageBubble({ message, decryptedContent, isSent, onDelete }: M
             <p className="text-sm leading-relaxed break-words">{decryptedContent}</p>
           )}
           <div className={cn("flex items-center gap-1 mt-1", isSent ? "justify-end" : "justify-start")}>
+            {message.isEdited && (
+              <span className="text-xs opacity-50 italic mr-1">edited</span>
+            )}
             <span className="text-xs opacity-70">{formatTime(message.createdAt)}</span>
             {isSent && <span className="opacity-70">{getStatusIcon()}</span>}
           </div>
         </div>
 
-        {/* Delete menu - shown on right for received messages */}
+        {/* Menu - shown on right for received messages */}
         {!isSent && onDelete && (
           <div className="opacity-0 group-hover:opacity-100 transition-opacity ml-1 self-center">
             <DropdownMenu>
