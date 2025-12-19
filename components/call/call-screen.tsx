@@ -56,9 +56,11 @@ export function CallScreen({
 
   // Audio output state
   type AudioOutputMode = "phone" | "speaker" | "bluetooth"
-  const [audioOutputMode, setAudioOutputMode] = useState<AudioOutputMode>("phone")
+  const [audioOutputMode, setAudioOutputMode] = useState<AudioOutputMode>("speaker") // Default to speaker on mobile
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([])
   const [bluetoothAvailable, setBluetoothAvailable] = useState(false)
+  const [isIOS, setIsIOS] = useState(false)
+  const [supportsAudioOutput, setSupportsAudioOutput] = useState(true)
 
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -167,8 +169,22 @@ export function CallScreen({
     }
   }, [callStatus, handleClose])
 
-  // Enumerate audio output devices
+  // Detect iOS and enumerate audio output devices
   useEffect(() => {
+    // Detect iOS
+    const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    setIsIOS(iOS)
+
+    // Check if setSinkId is supported
+    const audioEl = document.createElement('audio')
+    const hasSinkId = 'setSinkId' in audioEl
+    setSupportsAudioOutput(hasSinkId && !iOS)
+
+    if (!hasSinkId || iOS) {
+      console.log("Audio output switching not supported on this device")
+    }
+
     const enumerateDevices = async () => {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices()
@@ -200,15 +216,31 @@ export function CallScreen({
 
   // Handle audio output switching
   const handleAudioOutputChange = async () => {
-    // Cycle through modes: phone -> speaker -> bluetooth (if available) -> phone
-    let nextMode: AudioOutputMode = "phone"
+    // On iOS, setSinkId is not supported - show message
+    if (isIOS || !supportsAudioOutput) {
+      // Just cycle through visual states to show user feedback
+      // On iOS, users need to use Control Center or connect bluetooth/wired headphones
+      let nextMode: AudioOutputMode = "speaker"
+      if (audioOutputMode === "speaker") {
+        nextMode = bluetoothAvailable ? "bluetooth" : "speaker"
+      } else if (audioOutputMode === "bluetooth") {
+        nextMode = "speaker"
+      }
+      setAudioOutputMode(nextMode)
 
-    if (audioOutputMode === "phone") {
+      // Log info for user
+      console.log("On iOS, use Control Center or connect headphones to switch audio output")
+      return
+    }
+
+    // Cycle through modes: speaker -> bluetooth (if available) -> speaker
+    // Note: Phone earpiece is typically not available via web APIs
+    let nextMode: AudioOutputMode = "speaker"
+
+    if (audioOutputMode === "speaker") {
+      nextMode = bluetoothAvailable ? "bluetooth" : "speaker"
+    } else if (audioOutputMode === "bluetooth") {
       nextMode = "speaker"
-    } else if (audioOutputMode === "speaker") {
-      nextMode = bluetoothAvailable ? "bluetooth" : "phone"
-    } else {
-      nextMode = "phone"
     }
 
     setAudioOutputMode(nextMode)
@@ -237,14 +269,6 @@ export function CallScreen({
             d.label.toLowerCase().includes("wireless")
           )
           targetDeviceId = bluetoothDevice?.deviceId || ""
-        } else {
-          // Phone earpiece - use communications device if available
-          const earpieceDevice = audioDevices.find(d =>
-            d.label.toLowerCase().includes("earpiece") ||
-            d.label.toLowerCase().includes("communications") ||
-            d.deviceId === "communications"
-          )
-          targetDeviceId = earpieceDevice?.deviceId || ""
         }
 
         if (targetDeviceId && audioElement?.setSinkId) {
@@ -266,18 +290,21 @@ export function CallScreen({
       case "bluetooth":
         return <Bluetooth className="h-6 w-6 text-white" />
       default:
-        return <Smartphone className="h-6 w-6 text-white" />
+        return <Volume2 className="h-6 w-6 text-white" />
     }
   }
 
   const getAudioOutputLabel = () => {
+    if (isIOS && !bluetoothAvailable) {
+      return "Speaker"
+    }
     switch (audioOutputMode) {
       case "speaker":
         return "Speaker"
       case "bluetooth":
         return "Bluetooth"
       default:
-        return "Phone"
+        return "Speaker"
     }
   }
 
@@ -377,15 +404,19 @@ export function CallScreen({
             <>
               {/* Remote Video (Full Screen) */}
               <div className="flex-1 relative bg-gray-900">
-                {hasRemoteStream ? (
-                  <video
-                    ref={remoteVideoRef}
-                    autoPlay
-                    playsInline
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
+                {/* Always render video element to avoid ref race condition */}
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  className={cn(
+                    "w-full h-full object-cover",
+                    !hasRemoteStream && "hidden"
+                  )}
+                />
+                {/* Placeholder when no remote stream */}
+                {!hasRemoteStream && (
+                  <div className="w-full h-full flex items-center justify-center absolute inset-0">
                     <div className="text-center">
                       <div className="w-24 h-24 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center text-white text-4xl font-bold mx-auto mb-4">
                         {(otherUser?.displayName || "U")[0].toUpperCase()}
@@ -511,10 +542,12 @@ export function CallScreen({
                   size="icon"
                   className={cn(
                     "h-14 w-14 rounded-full relative",
-                    audioOutputMode === "speaker" ? "bg-blue-500 hover:bg-blue-600" : "bg-white/20 hover:bg-white/30"
+                    audioOutputMode === "speaker" ? "bg-blue-500 hover:bg-blue-600" : "bg-white/20 hover:bg-white/30",
+                    isIOS && !bluetoothAvailable && "opacity-50"
                   )}
                   onClick={handleAudioOutputChange}
-                  title={getAudioOutputLabel()}
+                  title={isIOS ? "Connect headphones to switch audio" : getAudioOutputLabel()}
+                  disabled={isIOS && !bluetoothAvailable}
                 >
                   {getAudioOutputIcon()}
                   <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[10px] text-white/70 whitespace-nowrap">
